@@ -316,7 +316,7 @@ def sus_selection(pop, size):
     i = 0
     breeding = []
     for s in steps:
-        while p[i] < s:
+        while p[i] > s and i < size:
             i = i + 1
             breeding.append(i)
     return breeding

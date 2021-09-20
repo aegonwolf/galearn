@@ -60,6 +60,7 @@ class Individual:
         return new_gene, alternate
 
     def mutate(self):
+        """change gene with probability p_mutate"""
         gene = rng.choice(list(self._genes))
         if restrict_gnp and isinstance(settings.gene_pool[gene], float):
             # give chance of diversity = 1-p_mutate until p_outlier % chance
@@ -76,7 +77,7 @@ class Individual:
 
 
 class Population:
-    # create initial population
+    """ creates a population with parameters = genepool of size = size"""
     def __init__(self, genepool, size=10):
         self._population = create_population(genepool, size)
         self._size = size
@@ -84,26 +85,32 @@ class Population:
     # note that if several individuals have == best fitness anyone of them is returned in the sorted list
     @property
     def best_individual(self):
+        """the individual with the highest fitness of the current population"""
         return self._population[0]
 
     @property
     def best_fitness(self):
+        """the highest fitness achieved of the current population"""
         return self._population[0].fitness
 
     @property
     def population(self):
+        """the current population: a list of individuals (models)"""
         return self._population
 
     @property
     def size(self):
+        """the number of individuals in the current population"""
         return self._size
 
     def replace_generation(self, new_gen):
+        """replaces the current generation with a new population"""
         new_gen.sort(reverse=True)
         self._population = new_gen
 
 
-def set_settings(p_mutate, train_set, train_labels, scorer, model, params, restrict_gene_pool, gene_pool_window):
+def set_settings(p_mutate, train_set, train_labels, scorer, model, params, restrict_gene_pool, gene_pool_window, cv):
+    """global settings to be used across functions"""
     settings.p_outlier = 1 - p_mutate
     settings.X_train, settings.y_train = train_set, train_labels
     settings.fitness_function = scorer
@@ -111,6 +118,7 @@ def set_settings(p_mutate, train_set, train_labels, scorer, model, params, restr
     settings.gene_pool = params
     settings.restrict_gnp = restrict_gene_pool
     settings.gnp_window = gene_pool_window
+    settings.cv = cv
     return
 
 
@@ -128,10 +136,27 @@ def simulate(params,
              restrict_gene_pool=True,  # narrow genes i.e. finetune
              gene_pool_window=1.0,  # initial size of window
              decay=None,
+             pop_size = 10,
              elitism=2):
-    # add some fixed genes
-    set_settings(p_mutate, train_set, train_labels, scorer, model, params, restrict_gene_pool, gene_pool_window)
-    population = Population(settings.gene_pool)
+    """Simulates natural selection of models with genetic algorithms and
+
+    Parameters:
+        scorer: sklearn scorer function, greater is better than
+        iterations: the number of iterations to run the
+        model: an sklearn API compatible model
+        cv: number of cross validation folds
+        selection: selection algorithm to be used, see more -> galearn.selection
+        p_cross: probability of crossover
+        p_mutate: probability of mutation
+        sim_ann: Simulated Annealing, decay p_mutate and p_cross with time by rate decay
+        restrict_gene_pool: restrict gene_pool size by rate = decay
+        decay: used as exponential decay for probabilities and gene_pool_window
+        pop_size: size of population
+        elitism: the fixed number of individuals to make it into each iteration
+
+    """
+    set_settings(p_mutate, train_set, train_labels, scorer, model, params, restrict_gene_pool, gene_pool_window, cv)
+    population = Population(settings.gene_pool, pop_size)
     best_fitness = population.best_fitness
     if decay is None:
         decay = 1 / iterations
@@ -139,7 +164,7 @@ def simulate(params,
     for i in range(iterations):
         frac = int(1 - ((population.size - elitism) / population.size))
         new_gen = []
-        breeding = select_breeding(population, selection)
+        breeding = select_breeding(population, selection, frac)
 
         for elite in range(elitism):
             new_gen.append(population.population[elite])
@@ -253,6 +278,7 @@ def breed(parent_1, parent_2, p_cross, p_mutate, cv =3):
 
 
 def select_breeding(population, selection='truncation', frac=0.5):
+    """selects the individuals that are viable for breeding and passing on their genese"""
     size = int(population.size * frac)
     if selection == 'truncation':
         cut = int(len(population.population) * frac)

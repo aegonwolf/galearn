@@ -10,3 +10,4 @@ gnp_window = None
 restrict_gnp = None
 p_outlier = None
 cv = 3
+verbose = 0

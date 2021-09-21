@@ -54,8 +54,10 @@ class Individual:
         dist_1 = self._genes[gene] - min_c
         dist_2 = max_c - self._genes[gene]
         dist = min(dist_1, dist_2) * settings.gnp_window
+        #upper bound / lower bound
         lb = self._genes[gene] - dist
         ub = self._genes[gene] + dist
+        #have an alternative if new_gene is old gene
         new_gene, alternate = rng.choice(gene_pool[gene][(gene_pool[gene] >= lb) & (gene_pool[gene] <= ub)], 2)
         return new_gene, alternate
 
@@ -65,13 +67,12 @@ class Individual:
         if restrict_gnp and isinstance(settings.gene_pool[gene], float):
             # give chance of diversity = 1-p_mutate until p_outlier % chance
             if rng.random() < p_outlier:
-                print(f"got an outlier")
                 new_gene, alternate = rng.choice(settings.gene_pool[gene], 2)
             else:
                 new_gene, alternate = self.get_gene_from_window(gene)
         else:
             new_gene, alternate = rng.choice(settings.gene_pool[gene], 2)
-        # help make sure the gene get's mutated
+        # make sure the gene is different
         self._genes[gene] = alternate if new_gene == self._genes[gene] else new_gene
         return
 
@@ -109,7 +110,7 @@ class Population:
         self._population = new_gen
 
 
-def set_settings(p_mutate, train_set, train_labels, scorer, model, params, restrict_gene_pool, gene_pool_window, cv):
+def set_settings(p_mutate, train_set, train_labels, scorer, model, params, restrict_gene_pool, gene_pool_window, cv, verbose):
     """global settings to be used across functions"""
     settings.p_outlier = 1 - p_mutate
     settings.X_train, settings.y_train = train_set, train_labels
@@ -119,6 +120,7 @@ def set_settings(p_mutate, train_set, train_labels, scorer, model, params, restr
     settings.restrict_gnp = restrict_gene_pool
     settings.gnp_window = gene_pool_window
     settings.cv = cv
+    settings.verbose = verbose
     return
 
 
@@ -132,12 +134,13 @@ def simulate(params,
              selection='truncation',
              p_cross=1.0,
              p_mutate=1.0,
-             sim_ann=True,
+             sim_ann=False,
              restrict_gene_pool=True,  # narrow genes i.e. finetune
              gene_pool_window=1.0,  # initial size of window
              decay=None,
              pop_size = 10,
-             elitism=2):
+             elitism=2,
+             verbose = 0):
     """Simulates natural selection of models with genetic algorithms and
 
     Parameters:
@@ -155,7 +158,7 @@ def simulate(params,
         elitism: the fixed number of individuals to make it into each iteration
 
     """
-    set_settings(p_mutate, train_set, train_labels, scorer, model, params, restrict_gene_pool, gene_pool_window, cv)
+    set_settings(p_mutate, train_set, train_labels, scorer, model, params, restrict_gene_pool, gene_pool_window, cv, verbose)
     population = Population(settings.gene_pool, pop_size)
     best_fitness = population.best_fitness
     if decay is None:
@@ -189,13 +192,15 @@ def simulate(params,
             p_mutate = p_mutate - p_mutate * decay
             if settings.p_outlier > 0.1:
                 settings.p_outlier = 1 - p_mutate
-        if i % 50 == 0:
-            print(f"p_cross is {p_cross}")
+            if verbose == 1:
+                if i % 50 == 0:
+                    print(f"p_cross is {p_cross}, p_mutate is {p_mutate}")
     # note if several individuals have same fitness anyone of them is returned
     return population.best_individual
 
 
 def get_fitness(individual, fitness_fn, cv=3):
+    """ returns fitness of individual for custom fitness/cv"""
     X_train, y_train = settings.X_train, settings.y_train
     score = cross_val_score(individual, X_train, y_train, cv=cv, scoring=fitness_fn)
     return score.mean()
@@ -206,7 +211,6 @@ def create_population(genepool, size=10):
     population = []
     for i in range(size):
         population.append(generate_parent(genepool))
-
     population.sort(reverse=True)
     return population
 
@@ -236,8 +240,7 @@ def crossover(parent_1, parent_2, child_1, child_2):
         return [child_1, child_2]
     # perform crossover
     for gene in genes[start:cut]:
-        if isinstance(settings.gene_pool[gene],
-                      float):  # introduce more diversity by modified crossover for continous values
+        if isinstance(settings.gene_pool[gene], float):  # introduce more diversity by modified crossover for continous values
             # could also solve this with algebra, but I like using the predefined gene_pool
             lower = parent_1[gene]
             higher = parent_2[gene]
@@ -245,6 +248,7 @@ def crossover(parent_1, parent_2, child_1, child_2):
                 lower = parent_2[gene]
                 higher = parent_1[gene]
 
+            #double crossover
             new_gene_1, new_gene_2, = rng.choice(
                 settings.gene_pool[gene][(settings.gene_pool[gene] >= lower) & (settings.gene_pool[gene] <= higher)], 2)
             child_1.set_gene(gene, new_gene_1)
@@ -264,7 +268,7 @@ def breed(parent_1, parent_2, p_cross, p_mutate, cv =3):
     # children are copies of parents by default
     child_1, child_2 = Individual(parent_1.genes, parent_1.fitness), Individual(parent_2.genes, parent_2.fitness)
     if np.random.rand() < p_cross:
-        # genes = list(child_1.genes)  # make global to make more efficient!
+
         child_1, child_2 = crossover(parent_1, parent_2, child_1, child_2)
     # mutate if p
     if np.random.rand() < p_mutate:
@@ -284,16 +288,28 @@ def select_breeding(population, selection='truncation', frac=0.5):
         cut = int(len(population.population) * frac)
         breeding = population.population[:cut]
         return breeding
+    
     elif selection == 'fitness_proportionate' or selection == 'fp':
         return fp_selection(population, size)
+    
     elif selection == 'tournament':
         return tournament_selection(population, size)
+    
     elif selection == 'sus':
         return sus_selection(population, size)
+    
+    elif selection =='rev_tournament':
+        return rev_tournament_selection(population, size)
+    else:
+        raise NameError("invalid selection")
 
 
 # also elitism is almost unnecessary if tournament, almost!
 def tournament_selection(pop, size):
+    """ tournament selection
+
+    individual eliminate one another until desired breeding size is reached
+    """
     participants = [ind for ind in pop.population]
     breeding = []
     # could implement different rounds here
@@ -325,6 +341,10 @@ def rev_tournament_selection(pop, size):
 
 
 def fp_selection(pop, size):
+    """fitness proportionate selection also called roulette wheel
+
+    selects individuals with probability proportional to their relative fitness
+    """
     p = np.array([ind.fitness for ind in pop.population])
     total_fitness = p.sum()
     p = p / total_fitness
@@ -334,6 +354,11 @@ def fp_selection(pop, size):
 
 # stochastic universal sampling
 def sus_selection(pop, size):
+    """ stochastic universal sampling
+
+    gives all individuals a chance to be selected, but fitter individuals get selected more often.
+
+    """
     p = np.array([ind.fitness for ind in pop.population]).cumsum()
     total_fitness = np.array([ind.fitness for ind in pop.population]).sum()
     step = total_fitness / size
@@ -342,7 +367,11 @@ def sus_selection(pop, size):
     i = 0
     breeding = []
     for s in steps:
-        while p[i] > s and i < size:
+        while p[i] < s:
             i = i + 1
-            breeding.append(i)
+            breeding.append(pop.population[i])
     return breeding
+
+def get_avg_fitness(pop):
+    """ gets average fitness of whole population """
+    return np.array([ind.fitness for ind in pop.population]).sum() / pop.size

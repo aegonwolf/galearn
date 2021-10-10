@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 import os
 
-VERSION = '0.0.2'
+VERSION = '0.0.2.1'
 DESCRIPTION = 'Genetic Algorithms for model selection'
 # Setting up
 setup(

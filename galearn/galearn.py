@@ -284,6 +284,8 @@ def breed(parent_1, parent_2, p_cross, p_mutate, cv =3):
 def select_breeding(population, selection='truncation', frac=0.5):
     """selects the individuals that are viable for breeding and passing on their genese"""
     size = int(population.size * frac)
+    if size < 2:
+        size = 2
     if selection == 'truncation':
         cut = int(len(population.population) * frac)
         breeding = population.population[:cut]
